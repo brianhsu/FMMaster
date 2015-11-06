@@ -9,6 +9,7 @@ import java.nio.file.Path
 import org.squeryl.adapters.SQLiteAdapter
 import org.squeryl.KeyedEntity
 import org.squeryl.dsl.CompositeKey2
+import javax.sql.DataSource
 
 object DatabaseDSL extends PrimitiveTypeMode {
 
@@ -29,13 +30,23 @@ object DatabaseDSL extends PrimitiveTypeMode {
     on(fileIndex)(columns => declare(columns.filePath is indexed("FileIndexFileNameIndex")))
   }
 
-  def using[T](directory: Path)(f: => T) = {
-    val session = Session.create(
-      DriverManager.getConnection(s"jdbc:sqlite:${directory.toAbsolutePath}/fmmaster.db"),
-      new SQLiteAdapter
-    )
+  def using[T](dataSource: DataSource)(f: => T) = {
+    val session = Session.create(dataSource.getConnection, new SQLiteAdapter)
     val result = transaction(session) { f }
     session.close
     result
+  }
+
+  def createConnectionPool(directory: Path): DataSource = {
+    import org.apache.commons.pool2.impl.GenericObjectPool
+    import org.apache.commons.dbcp2.DriverManagerConnectionFactory
+    import org.apache.commons.dbcp2.PoolableConnectionFactory
+    import org.apache.commons.dbcp2.PoolingDataSource
+    val jdbcURL = s"jdbc:sqlite:${directory.toAbsolutePath}/fmmaster.db"
+    val connectionFactory = new DriverManagerConnectionFactory(jdbcURL, null)
+    val poolableConnectionFactory = new PoolableConnectionFactory(connectionFactory, null)
+    val connectionPool = new GenericObjectPool(poolableConnectionFactory)
+    poolableConnectionFactory.setPool(connectionPool)
+    new PoolingDataSource(connectionPool)
   }
 }

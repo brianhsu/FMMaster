@@ -1,4 +1,4 @@
-package moe.brianhsu.fmmaster.util
+package moe.brianhsu.fmmaster.utils
 
 import java.io._
 import java.io.BufferedInputStream
