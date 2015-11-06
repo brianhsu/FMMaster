@@ -11,47 +11,6 @@ import name.pachler.nio.file.ext.ExtendedWatchEventKind._
 import name.pachler.nio.file.StandardWatchEventKind._
 import scala.collection.JavaConversions._
 
-object FileChangeMonitor {
-
-
-  private def toJavaPath(path: Path) = JPaths.get(path.toString)
-  private def toWatcherPath(path: JPath) = Paths.get(path.toAbsolutePath.toString)
-
-  /**
-   *  The interface represent file change event.
-   */
-  sealed trait Event
-
-  /**
-   *  File or directory has been created.
-   *
-   *  @param  path  The path object that represented the created file
-   */
-  case class Create(path: JPath) extends Event
-
-  /**
-   *  File or directory has been modified.
-   *
-   *  @param  path  The path object that represented the modified file
-   */
-  case class Modify(path: JPath) extends Event
-
-  /**
-   *  File or directory has been deleted.
-   *
-   *  @param  path  The path object that represented the deleted file
-   */
-  case class Delete(path: JPath) extends Event
-
-  /**
-   *  File or directory has been renamed.
-   *
-   *  @param  oldPath  The path object that represented the original file
-   *  @param  newPath  The path object that represented the destination file
-   */
-  case class Rename(oldPath: JPath, newPath: JPath) extends Event
-}
-
 /**
  *  This class will monitor a directory, and run the callback when
  *  file or folder is beeen created / modified / deleted or renamed.
@@ -62,7 +21,7 @@ object FileChangeMonitor {
  *  {{{
       import moe.brianhsu.fmmaster.utils.FileChangeMonitor
       import java.nio.file.Paths
-      val monitor = new FileChangeMonitor(Paths.get("/home/brianhsu"), true)
+      val monitor = new JPathWatchFileChangeMonitor(Paths.get("/home/brianhsu"), true)
       monitor.startWatch { 
         case FileChangeMonitor.Create(path) => println(s"File $path is created")
         case FileChangeMonitor.Rename(oldPath, newPath) => println("File $oldPath is renamed to $newPath")
@@ -75,7 +34,7 @@ object FileChangeMonitor {
  *  @param    directory     The directory been monitored.
  *  @param    isRecursive   Should we monitor subdirectory?
  */
-class FileChangeMonitor(directory: JPath, isRecursive: Boolean = true) {
+class JPathWatcherFileChangeMonitor(directory: JPath, isRecursive: Boolean = true) extends FileChangeMonitor(directory, isRecursive) {
 
   import FileChangeMonitor._
 
@@ -83,6 +42,8 @@ class FileChangeMonitor(directory: JPath, isRecursive: Boolean = true) {
   private var keyToDirectory: Map[WatchKey, Path] = Map.empty
   private var shouldStop: Boolean = false
   private var watchThreadHolder: Option[Thread] = None
+  private def toJavaPath(path: Path) = JPaths.get(path.toString)
+  private def toWatcherPath(path: JPath) = Paths.get(path.toAbsolutePath.toString)
 
   /**
    *  Register a directory to WatcherService

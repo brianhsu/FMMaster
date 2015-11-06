@@ -29,6 +29,8 @@ class FMMasterDirActor(dirLocation: String) {
   implicit val dirPath = Paths.get(dirLocation)
   implicit val dataSource = DatabaseDSL.createConnectionPool(dirPath)
 
+  val watcher = new JavaFileChangeMonitor(Paths.get(dirLocation))
+
   def getShouldUpdateFiles(basicFileInfoList: List[BasicFileInfo]) =  {
     using(dataSource) {
       basicFileInfoList.filter { basicFileInfo =>
@@ -96,6 +98,16 @@ class FMMasterDirActor(dirLocation: String) {
   }
 
   def startWatching() {
+    watcher.startWatch {
+      case FileChangeMonitor.Create(t) => println("File Create:" + t)
+      case FileChangeMonitor.Modify(t) => println("File Modify:" + t)
+      case FileChangeMonitor.Delete(t) => println("File Delete:" + t)
+      case FileChangeMonitor.Rename(t, s) => println("File Rename:" + t + " -> " + s)
+    }
+  }
+
+  def stopWatching() {
+    watcher.stopWatch()
   }
 
 }
@@ -103,14 +115,8 @@ class FMMasterDirActor(dirLocation: String) {
 object HelloWorld {
   def main(args: Array[String]) {
     val t = new FMMasterDirActor("/mnt/WinD/MEGA")
-    // t.updateFileIndex()
-    // t.startWatching()
-    val watcher = new FileChangeMonitor(Paths.get("/mnt/WinD/qqq"))
-    watcher.startWatch {
-      case FileChangeMonitor.Create(t) => println("File Create:" + t)
-      case FileChangeMonitor.Modify(t) => println("File Modify:" + t)
-      case FileChangeMonitor.Delete(t) => println("File Delete:" + t)
-      case FileChangeMonitor.Rename(t, s) => println("File Rename:" + t + " -> " + s)
-    }
+    t.updateFileIndex()
+    t.startWatching()
+    println("DONE....")
   }
 }
