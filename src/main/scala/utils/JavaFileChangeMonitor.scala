@@ -94,7 +94,6 @@ class JavaFileChangeMonitor(directory: Path, isRecursive: Boolean = true) extend
    */
   private def register(directory: Path) {
     val watchKey = directory.register(watcher, ENTRY_CREATE, ENTRY_DELETE, ENTRY_MODIFY)
-    println(s"Register $directory....")
     keyToDirectory += (watchKey -> directory)
   }
 

@@ -1,11 +1,16 @@
 package moe.brianhsu.fmmaster
 
+import akka.actor.Props
+import java.io.File
 import java.nio.file.attribute.BasicFileAttributes
 import java.nio.file.Files
 import java.nio.file.FileVisitResult
 import java.nio.file.Path
 import java.nio.file.Paths
+import java.nio.file.LinkOption
 import java.nio.file.SimpleFileVisitor
+import moe.brianhsu.fmmaster.actor._
+import moe.brianhsu.fmmaster.actor.UpdateDBActor._
 import moe.brianhsu.fmmaster.model._
 import moe.brianhsu.fmmaster.model.DatabaseDSL
 import moe.brianhsu.fmmaster.model.DatabaseDSL._
@@ -20,7 +25,9 @@ class FMMasterDirectory(dirLocation: String) {
   implicit val dirPath = Paths.get(dirLocation)
   implicit val dataSource = DatabaseDSL.createConnectionPool(dirPath)
 
-  val watcher = new JavaFileChangeMonitor(Paths.get(dirLocation))
+  private val databaseFiles = DatabaseDSL.databaseFiles(dirPath)
+  private val watcher = new JPathWatcherFileChangeMonitor(Paths.get(dirLocation))
+  private val updateDBActor = UpdateDBActor.actorSystem.actorOf(Props(classOf[UpdateDBActor], dirLocation))
 
   def getShouldUpdateFiles(basicFileInfoList: List[BasicFileInfo]) =  {
     using(dataSource) {
@@ -88,12 +95,33 @@ class FMMasterDirectory(dirLocation: String) {
     updateFileIndex(sha1List)
   }
 
+  def isDirectory(path: Path) = Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS)
+  def isNotDatabaseFile(path: Path) = !databaseFiles.contains(path.toAbsolutePath.toString)
+
   def startWatching() {
     watcher.startWatch {
-      case FileChangeMonitor.Create(t) => println("File Create:" + t)
-      case FileChangeMonitor.Modify(t) => println("File Modify:" + t)
-      case FileChangeMonitor.Delete(t) => println("File Delete:" + t)
-      case FileChangeMonitor.Rename(t, s) => println("File Rename:" + t + " -> " + s)
+      case FileChangeMonitor.Create(path) if isDirectory(path) => 
+        updateDBActor ! InsertDirectoryIntoFileIndex(path, System.currentTimeMillis)
+      case FileChangeMonitor.Delete(path) if isDirectory(path) => 
+        updateDBActor ! DeleteDirectoryFromFileIndex(path, System.currentTimeMillis)
+      case FileChangeMonitor.Rename(source, dest) if isDirectory(dest) => 
+        updateDBActor ! InsertDirectoryIntoFileIndex(dest, System.currentTimeMillis)
+        updateDBActor ! DeleteDirectoryFromFileIndex(source, System.currentTimeMillis)
+
+      case FileChangeMonitor.Create(path) if isNotDatabaseFile(path) => 
+        println(s"FileChangeMonitor.Create($path)")
+        updateDBActor ! InsertIntoFileIndex(path, System.currentTimeMillis)
+      case FileChangeMonitor.Modify(path) if isNotDatabaseFile(path) => 
+        println(s"FileChangeMonitor.Modify($path)")
+        updateDBActor ! UpdateFileIndex(path, System.currentTimeMillis)
+      case FileChangeMonitor.Delete(path) if isNotDatabaseFile(path) => 
+        println(s"FileChangeMonitor.Delete($path)")
+        updateDBActor ! DeleteFromFileIndex(path, System.currentTimeMillis)
+      case FileChangeMonitor.Rename(source, dest) if isNotDatabaseFile(source) && isNotDatabaseFile(dest) => 
+        println(s"FileChangeMonitor.Rename($source, $dest)")
+        updateDBActor ! DeleteFromFileIndex(dest, System.currentTimeMillis)
+        updateDBActor ! InsertIntoFileIndex(source, System.currentTimeMillis)
+
     }
   }
 
