@@ -56,7 +56,14 @@ class FMMasterDirectory(dirLocation: String) {
               file.sha1 = sha1FileInfo.sha1
               file.size = basicFileInfo.size
               file.lastModifiedTime = basicFileInfo.lastModifiedTime
-              FMMasterDirDB.fileIndex.update(file)
+              update(FMMasterDirDB.fileIndex) { fileIndex =>
+                where(fileIndex.filePath === file.filePath).
+                set(
+                  fileIndex.sha1 := sha1FileInfo.sha1,
+                  fileIndex.size := basicFileInfo.size,
+                  fileIndex.lastModifiedTime := basicFileInfo.lastModifiedTime
+                )
+              }
           }
         }
       }

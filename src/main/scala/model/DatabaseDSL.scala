@@ -18,9 +18,8 @@ object DatabaseDSL extends PrimitiveTypeMode {
   class MetadataSchema(val fieldName: String, val isUnique: Boolean, val fieldType: String, val comment: Option[String])
   class MetadataStore(val sha1: String, val fieldName: String, val content: String)
   class DeletedIndex(val filePath: String, val sha1: String, val deletedTime: Long)
-  class FileIndex(var sha1: String, val filePath: String, 
-                  var size: Long, var lastModifiedTime: Long) extends KeyedEntity[CompositeKey2[String, String]] {
-    def id = compositeKey(sha1, filePath)
+  class FileIndex(var sha1: String, val filePath: String, var size: Long, var lastModifiedTime: Long) {
+    override def toString = s"FileIndex($sha1, $filePath, $size, $lastModifiedTime)"
   }
   
   object FMMasterDirDB extends Schema {
