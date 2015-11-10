@@ -32,7 +32,8 @@ class FMMasterDirectory(dirLocation: String) {
   def getShouldUpdateFiles(basicFileInfoList: List[BasicFileInfo]) =  {
     using(dataSource) {
       basicFileInfoList.filter { basicFileInfo =>
-        val file = FMMasterDirDB.fileIndex.where(_.filePath === basicFileInfo.filePath).headOption
+        val relativePath = dirPath.relativize(basicFileInfo.filePath).toString
+        val file = FMMasterDirDB.fileIndex.where(_.filePath === relativePath).headOption
         val filteredFile = file.filter { f => 
           f.size == basicFileInfo.size && f.lastModifiedTime == basicFileInfo.lastModifiedTime
         }
@@ -41,39 +42,21 @@ class FMMasterDirectory(dirLocation: String) {
     }
   }
 
-  def updateFileIndex(fileList: List[SHA1FileInfo]) = Future {
+  def updateFileIndex(fileList: List[BasicFileInfo]) = Future {
     using(dataSource) {
-      fileList.foreach { sha1FileInfo =>
-        val basicFileInfo = sha1FileInfo.basicFileInfo
+      fileList.foreach { basicFileInfo =>
         if (basicFileInfo.file.exists) {
-          val fileHolder = FMMasterDirDB.fileIndex.where(_.filePath === basicFileInfo.filePath).headOption
-          fileHolder match {
-            case None =>
-              FMMasterDirDB.fileIndex.insert(
-                new FileIndex(sha1FileInfo.sha1, basicFileInfo.filePath, basicFileInfo.size, basicFileInfo.lastModifiedTime)
-              )
-            case Some(file) =>
-              file.sha1 = sha1FileInfo.sha1
-              file.size = basicFileInfo.size
-              file.lastModifiedTime = basicFileInfo.lastModifiedTime
-              update(FMMasterDirDB.fileIndex) { fileIndex =>
-                where(fileIndex.filePath === file.filePath).
-                set(
-                  fileIndex.sha1 := sha1FileInfo.sha1,
-                  fileIndex.size := basicFileInfo.size,
-                  fileIndex.lastModifiedTime := basicFileInfo.lastModifiedTime
-                )
-              }
+          val relativePath = dirPath.relativize(basicFileInfo.filePath).toString
+          val fileHolder = FMMasterDirDB.fileIndex.where(_.filePath === relativePath).headOption
+          val message = fileHolder match {
+            case None => InsertIntoFileIndex(basicFileInfo.filePath, System.currentTimeMillis)
+            case Some(file) => UpdateFileIndex(basicFileInfo.filePath, System.currentTimeMillis)
           }
+          println(s"====> Sent message: $message")
+          updateDBActor ! message
         }
       }
     }
-  }
-
-  def getSHA1FileInfo(basicFileInfo: BasicFileInfo): Future[Option[SHA1FileInfo]] = {
-    Future(SHA1Utils.sha1Checksum(basicFileInfo.file)).
-      map(sha1 => Some(SHA1FileInfo(basicFileInfo, sha1))).
-      recover { case e: Exception => None }
   }
 
   def getFileList: List[BasicFileInfo] = {
@@ -82,8 +65,7 @@ class FMMasterDirectory(dirLocation: String) {
 
     class FileLister extends SimpleFileVisitor[Path] {
       override def visitFile(file: Path, attr: BasicFileAttributes): FileVisitResult = {
-        val relativePath = dirPath.relativize(file)
-        val basicFileInfo = BasicFileInfo(relativePath.normalize.toString, attr.size, attr.lastModifiedTime.toMillis)
+        val basicFileInfo = BasicFileInfo(file, attr.size, attr.lastModifiedTime.toMillis)
         files ::= basicFileInfo
         FileVisitResult.CONTINUE
       }
@@ -97,9 +79,7 @@ class FMMasterDirectory(dirLocation: String) {
     val startTime = System.currentTimeMillis
     val files: List[BasicFileInfo] = getFileList
     val shouldUpdateList: List[BasicFileInfo] = getShouldUpdateFiles(files)
-    val sha1FutureList = Future.sequence(shouldUpdateList.map(getSHA1FileInfo))
-    val sha1List: List[SHA1FileInfo] = Await.result(sha1FutureList, Duration.Inf).flatten
-    updateFileIndex(sha1List)
+    updateFileIndex(shouldUpdateList)
   }
 
   def isDirectory(path: Path) = Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS)
@@ -128,7 +108,6 @@ class FMMasterDirectory(dirLocation: String) {
         println(s"FileChangeMonitor.Rename($source, $dest)")
         updateDBActor ! DeleteFromFileIndex(dest, System.currentTimeMillis)
         updateDBActor ! InsertIntoFileIndex(source, System.currentTimeMillis)
-
     }
   }
 
