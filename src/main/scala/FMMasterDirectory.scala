@@ -20,6 +20,12 @@ import scala.concurrent.duration._
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.Future
 
+/**
+ *  This class represent a directory that should be
+ *  managed and monitored by FMMaster. 
+ *
+ *  @param  dirLocation   The directory that will be watched.
+ */
 class FMMasterDirectory(dirLocation: String) {
 
   implicit val dirPath = Paths.get(dirLocation)
@@ -29,6 +35,16 @@ class FMMasterDirectory(dirLocation: String) {
   private val watcher = new JPathWatcherFileChangeMonitor(Paths.get(dirLocation))
   private val updateDBActor = UpdateDBActor.actorSystem.actorOf(Props(classOf[UpdateDBActor], dirLocation))
 
+  /**
+   *  Filter all files that should be updated in FileIndex table.
+   *
+   *  This method will check each file in basicFileInfoList, if
+   *  file's legnth / lastModifiedTime differs from record in
+   *  FileIndex, it means if should be updated.
+   *
+   *  @param    basicFileInfoList   The file list to be processed.
+   *  @return                       Files in basicFileInfoList that need updated in FileIndexTable.
+   */
   def getShouldUpdateFiles(basicFileInfoList: List[BasicFileInfo]) =  {
     using(dataSource) {
       basicFileInfoList.filter { basicFileInfo =>
@@ -42,6 +58,15 @@ class FMMasterDirectory(dirLocation: String) {
     }
   }
 
+  /**
+   *  Update record in FileIndex table
+   *
+   *  This method will calculate new SHA1 hash checksum of files
+   *  in fileList, and insert or update it's record in FileIndex
+   *  table.
+   *
+   *  @param    fileList    Files need to updated in FileIndex.
+   */
   def updateFileIndex(fileList: List[BasicFileInfo]) = Future {
     using(dataSource) {
       fileList.foreach { basicFileInfo =>
@@ -59,6 +84,13 @@ class FMMasterDirectory(dirLocation: String) {
     }
   }
 
+  /**
+   *  Get all files in dirLocation.
+   *
+   *  Get all files in dirLocation recursively. (Include subdirectory)
+   *
+   *  @return   All files in dirLocation.
+   */
   def getFileList: List[BasicFileInfo] = {
 
     var files: List[BasicFileInfo] = Nil
@@ -75,16 +107,42 @@ class FMMasterDirectory(dirLocation: String) {
     files
   }
 
+  /**
+   *  Update FileIndex table.
+   *
+   *  This method will scan through dirLocation and filter out
+   *  files need to update, and update corresponding records
+   *  in FileIndex table.
+   */
   def updateFileIndex() {
-    val startTime = System.currentTimeMillis
     val files: List[BasicFileInfo] = getFileList
     val shouldUpdateList: List[BasicFileInfo] = getShouldUpdateFiles(files)
     updateFileIndex(shouldUpdateList)
   }
 
+  /**
+   *  Check if a Path object represent a directory
+   *
+   *  @param    path      Path want to check
+   *  @return             True if path is a directory, false otherwise.
+   */
   def isDirectory(path: Path) = Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS)
+
+  /**
+   *  Check if a Path object represent a FMMaster database releated file.
+   *
+   *  @param    path      Path want to check
+   *  @return             True if path is a FMMaster database file, false otherwise.
+   */
   def isNotDatabaseFile(path: Path) = !databaseFiles.contains(path.toAbsolutePath.toString)
 
+  /**
+   *  Start watching this directory.
+   *
+   *  This method will starts a watch service that monitors the file or directory
+   *  changes in this directory, and pass message to UpdateDB actor to update 
+   *  records in FMMaster database.
+   */
   def startWatching() {
     watcher.startWatch {
       case FileChangeMonitor.Create(path) if isDirectory(path) => 
@@ -96,21 +154,20 @@ class FMMasterDirectory(dirLocation: String) {
         updateDBActor ! DeleteDirectoryFromFileIndex(source, System.currentTimeMillis)
 
       case FileChangeMonitor.Create(path) if isNotDatabaseFile(path) => 
-        println(s"FileChangeMonitor.Create($path)")
         updateDBActor ! InsertIntoFileIndex(path, System.currentTimeMillis)
       case FileChangeMonitor.Modify(path) if isNotDatabaseFile(path) => 
-        println(s"FileChangeMonitor.Modify($path)")
         updateDBActor ! UpdateFileIndex(path, System.currentTimeMillis)
       case FileChangeMonitor.Delete(path) if isNotDatabaseFile(path) => 
-        println(s"FileChangeMonitor.Delete($path)")
         updateDBActor ! DeleteFromFileIndex(path, System.currentTimeMillis)
       case FileChangeMonitor.Rename(source, dest) if isNotDatabaseFile(source) && isNotDatabaseFile(dest) => 
-        println(s"FileChangeMonitor.Rename($source, $dest)")
         updateDBActor ! DeleteFromFileIndex(dest, System.currentTimeMillis)
         updateDBActor ! InsertIntoFileIndex(source, System.currentTimeMillis)
     }
   }
 
+  /**
+   *  Stop watching this directory.
+   */
   def stopWatching() {
     watcher.stopWatch()
   }
